@@ -44,7 +44,8 @@ impl Database {
 
 - Must implement `async fn new() -> Self`.
 - The `new` method is used to create the component instance.
-- Components are shared by being wrapped in `Arc<T>`.
+- Factories return owned component values; the container applies caching and wrapping based on lifetime.
+- `Arc<T>` supports every lifetime, while owned `T` injection is limited to transient components.
 
 ## Injecting Components
 
@@ -205,16 +206,20 @@ async fn main() {
 
 ### Automatic Initialization
 
-When using the `#[miko]` macro, the dependency container is initialized automatically:
+Each `Application` owns an independent dependency container. The `#[miko]` macro creates the
+`Application`, so no global container initialization is required:
 
 ```rust
 #[miko]
 async fn main() {
-    // 1. Dependency container initialization
+    // 1. Application creation with its own dependency container
     // 2. Route collection
     // 3. Application start
 }
 ```
+
+Use `Application::with_dependencies` to provide a custom container, especially in tests. Converting
+a `Router` directly into a Tower service also creates an independent container for that service.
 
 ### Prewarming
 
@@ -230,7 +235,7 @@ impl Database {
 }
 ```
 
-Prewarmed components are initialized asynchronously after the application starts, without blocking the server startup.
+Prewarming finishes before the server binds its listening socket. A construction failure aborts startup with an error.
 
 ## Component Lifecycles
 
@@ -258,7 +263,7 @@ If you want a brand-new instance for every injection, use the `transient` mode:
 
 ```rust
 #[component(transient)]
-impl RequestScopedLogger {
+impl OperationLogger {
     async fn new() -> Self {
         println!("This runs on every injection");
         Self::default()
@@ -267,11 +272,57 @@ impl RequestScopedLogger {
 ```
 
 You can also explicitly write `#[component(mode = "singleton")]` / `#[component(mode = "transient")]` for clearer
-intent. Transient components execute the `new` method on every Handler call and thus do not support `prewarm`.
+intent. Transient components execute the `new` method on every resolution and thus do not support `prewarm`.
+
+Transient components may be injected either through a shared reference or as an owned value:
+
+```rust
+#[get("/operation")]
+async fn operation(#[dep] logger: OperationLogger) {
+    // logger is a newly constructed owned value for this resolution
+}
+```
+
+Injecting a singleton or request-scoped component as owned `T` returns a lifetime error because moving a value out of
+the cache would violate its sharing semantics.
+
+### Request Scope
+
+Use `request` when an instance should be shared within one HTTP request but isolated between requests:
+
+```rust
+#[component(request)]
+impl RequestContext {
+    async fn new() -> Self {
+        Self::default()
+    }
+}
+
+#[get("/users")]
+async fn users(
+    #[dep] first: Arc<RequestContext>,
+    #[dep] second: Arc<RequestContext>,
+) {
+    // first and second point to the same request-scoped instance
+}
+```
+
+`#[component(mode = "request")]` is also supported.
+
+Request-scoped instances are stored in the current request extensions and are dropped when the request finishes.
+Middleware and handlers share the same request scope. A request-scoped component cannot be resolved outside an
+HTTP request or injected into a singleton component.
+
+| Lifetime | Creation frequency | Reused within request | Prewarm |
+|---|---|---|---|
+| `singleton` | Once per application | Yes | Yes |
+| `request` | Once per request | Yes | No |
+| `transient` | Once per resolution | No | No |
 
 ### Shared References
 
-Components are shared via `Arc<T>`, making them safe to use across multiple Handlers and threads:
+With `Arc<T>`, the container wraps components according to their lifetime. Singleton and request-scoped components
+reuse an `Arc<T>`, while each transient resolution is wrapped in a fresh `Arc<T>`:
 
 ```rust
 #[get("/route1")]
@@ -289,7 +340,8 @@ async fn handler2(#[dep] db: Arc<Database>) {
 
 ### Constructor Injection
 
-A component's `new` function can receive other components as dependencies (must be of type `Arc<T>`):
+A component's `new` function can receive other components as dependencies. `Arc<T>` supports every lifetime; an
+owned `T` dependency must be transient:
 
 ```rust
 // Base Components
@@ -324,6 +376,17 @@ impl UserService {
             return Some(cached);
         }
         self.db.find_user(id)
+    }
+}
+```
+
+For example, one transient component can take ownership of another transient component:
+
+```rust
+#[component(transient)]
+impl RequestTimer {
+    async fn new(clock: OperationClock) -> Self {
+        Self { clock }
     }
 }
 ```

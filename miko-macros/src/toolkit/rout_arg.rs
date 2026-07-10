@@ -1,6 +1,6 @@
 use crate::toolkit::attr::StrAttrMap;
 use proc_macro2::TokenStream;
-use quote::{ToTokens, quote};
+use quote::{ToTokens, format_ident, quote};
 use std::collections::HashMap;
 use std::fmt;
 use std::fmt::{Debug, Formatter};
@@ -166,32 +166,68 @@ pub enum FnArgResult {
     RemoveAttr,
 }
 
-/// 为带有 `#[dep]` 标记的参数生成依赖注入的语句。
-///
-/// 该函数会为每个标记为 `dep` 的参数生成从全局依赖容器中异步获取该依赖的语句片段，并追加到 `dep_stmts`。
-pub fn build_dep_injector(rfa: &Vec<RouteFnArg>, dep_stmts: &mut Vec<TokenStream>) {
+/// 将 `#[dep] value: Arc<T>` 转换为内部 `Dep<T>` 提取器，并恢复用户变量。
+pub fn build_dep_extractors(rfa: &[RouteFnArg]) -> (Vec<FnArg>, Vec<TokenStream>) {
+    let mut dep_inputs = Vec::new();
+    let mut dep_stmts = Vec::new();
+
+    for (index, rfa) in rfa.iter().enumerate() {
+        if rfa.mark.contains_key("dep") {
+            let dep_ty = rfa.ty.clone();
+            let (is_arc, inner) = is_arc(&dep_ty);
+            let dep_ident = rfa.ident.clone();
+            let extractor_ident = format_ident!("__miko_dep_{index}");
+            let input = if is_arc {
+                let inner = inner.expect("Arc dependency should have an inner type");
+                syn::parse2(quote! {
+                    ::miko::dependency_container::Dep(#extractor_ident):
+                        ::miko::dependency_container::Dep<#inner>
+                })
+            } else {
+                syn::parse2(quote! {
+                    ::miko::dependency_container::OwnedDep(#extractor_ident):
+                        ::miko::dependency_container::OwnedDep<#dep_ty>
+                })
+            }
+            .expect("generated dependency extractor should be valid");
+            dep_inputs.push(input);
+            dep_stmts.push(quote! {
+                let #dep_ident = #extractor_ident;
+            });
+        }
+    }
+
+    (dep_inputs, dep_stmts)
+}
+
+/// 为中间件中的 `#[dep]` 参数生成基于当前请求作用域的解析语句。
+pub fn build_dep_injector(
+    rfa: &[RouteFnArg],
+    request_ident: &syn::Ident,
+    dep_stmts: &mut Vec<TokenStream>,
+) {
     for rfa in rfa {
         if rfa.mark.contains_key("dep") {
             let dep_ty = rfa.ty.clone();
             let (is_arc, inner) = is_arc(&dep_ty);
-            if !is_arc {
-                panic!("dep param must be a Arc<T>");
-            }
-            let inner = inner.unwrap();
             let dep_ident = rfa.ident.clone();
-            let stmt = quote! {
-                let #dep_ident = __dep_container.get::<#inner>().await;
-            };
-            dep_stmts.push(stmt);
+            if is_arc {
+                let inner = inner.expect("Arc dependency should have an inner type");
+                dep_stmts.push(quote! {
+                    let #dep_ident =
+                        ::miko::dependency_container::resolve_from_request::<#inner>(
+                            &#request_ident
+                        ).await?;
+                });
+            } else {
+                dep_stmts.push(quote! {
+                    let #dep_ident =
+                        ::miko::dependency_container::resolve_owned_from_request::<#dep_ty>(
+                            &#request_ident
+                        ).await?;
+                });
+            }
         }
-    }
-    if !dep_stmts.is_empty() {
-        dep_stmts.insert(
-            0,
-            quote! {
-                let __dep_container = ::miko::dependency_container::get_global_dc().await;
-            },
-        );
     }
 }
 

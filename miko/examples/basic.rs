@@ -10,12 +10,20 @@ use miko::{
     handler::{Req, Resp},
     http::response::sse::{SseSender, spawn_sse_event},
     macros::*,
+    openapi::AutoPaths,
     router::Router,
     ws::server::{IntoMessage, spawn_ws_event},
     *,
 };
 use serde::Deserialize;
 use tokio::sync::Mutex;
+
+#[derive(OpenApi)]
+#[openapi(
+    info(title = "Miko Basic Example API", version = "1.0.0"),
+    modifiers(&AutoPaths)
+)]
+struct ApiDoc;
 
 #[derive(Deserialize)]
 struct MyQuery {
@@ -342,6 +350,12 @@ pub async fn create_app() {
 
     router.nest("/no_macro", no_macro_router);
 
+    // register openapi route
+    // macro-based routes can be add to openapi doc by using modifiers
+    router.get("/api-docs/openapi.json", || async {
+        Json(ApiDoc::openapi())
+    });
+
     router.static_svc(
         "/static",
         "./static",
@@ -357,6 +371,7 @@ pub async fn create_app() {
 }
 
 #[tokio::main]
+#[allow(unused)]
 async fn main() {
     tracing_subscriber::fmt::init(); // initialize logging (optional)
     let app = create_app().await;

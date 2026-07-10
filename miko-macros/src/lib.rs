@@ -92,13 +92,6 @@ pub fn miko(attr: TokenStream, item: TokenStream) -> TokenStream {
         None
     };
     let build_sign = str_attr_map.map.contains_key("build");
-    let dep_init = if cfg!(feature = "auto") {
-        quote! {
-            ::miko::auto::init_container().await;
-        }
-    } else {
-        quote! {}
-    };
     if build_sign {
         quote! {
             #fn_vis async fn #fn_name() -> ::miko::app::Application {
@@ -106,7 +99,6 @@ pub fn miko(attr: TokenStream, item: TokenStream) -> TokenStream {
                 let mut _config = ::miko::app::config::ServerSettings::from_global_settings();
                 let mut router = ::miko::router::Router::new();
                 #catch_panic
-                #dep_init
 
                 #( #user_statements )*
 
@@ -122,7 +114,6 @@ pub fn miko(attr: TokenStream, item: TokenStream) -> TokenStream {
                 let mut _config = ::miko::app::config::ServerSettings::from_global_settings();
                 let mut router = ::miko::router::Router::new();
                 #catch_panic
-                #dep_init
 
                 #( #user_statements )*
 
@@ -172,7 +163,9 @@ derive_route_macro!(connect, CONNECT);
 ///
 /// 使用：
 /// - 在 `impl` 上添加 `#[component]`（可带 `prewarm`）以将该类型注册为预热组件；
-/// - 构造函数应为 `async fn new(...) -> Self`；构造函数的参数可以声明其它组件的依赖（以 `Arc<T>` 形式）；
+/// - 使用 `#[component(request)]` 声明每个 HTTP 请求内复用的组件；
+/// - 使用 `#[component(transient)]` 声明每次解析都重新创建的组件；
+/// - 构造函数应为 `async fn new(...) -> Self`；`Arc<T>` 可解析任意生命周期，按值 `T` 仅可解析 transient 组件；
 /// - 注册后的组件可在处理器参数上使用 `#[dep]` 标注注入（当启用 `auto` 时）。
 ///
 /// `prewarm` 生效条件：仅在应用通过 `#[miko]` 启动（并启用 `auto`）时才会在启动阶段触发预热。
@@ -194,32 +187,24 @@ pub fn component(attr: TokenStream, input: TokenStream) -> TokenStream {
     let args = syn::parse_macro_input!(attr as StrAttrMap);
     let input_struct = parse_macro_input!(input as ItemImpl);
     let prewarm = args.get("prewarm").is_some();
-    let mut lifetime_singleton = true;
+    let mut lifetime = "singleton".to_string();
     let mut lifetime_specified = false;
 
     let mut set_lifetime = |mode: &str| {
         let normalized = mode.to_ascii_lowercase();
         match normalized.as_str() {
-            "singleton" => {
-                if lifetime_specified && !lifetime_singleton {
+            "singleton" | "request" | "transient" => {
+                if lifetime_specified && lifetime != normalized {
                     panic!(
-                        "Conflicting #[component] lifetime: both singleton and transient specified"
+                        "Conflicting #[component] lifetime: both '{}' and '{}' specified",
+                        lifetime, normalized
                     );
                 }
-                lifetime_singleton = true;
-                lifetime_specified = true;
-            }
-            "transient" => {
-                if lifetime_specified && lifetime_singleton {
-                    panic!(
-                        "Conflicting #[component] lifetime: both singleton and transient specified"
-                    );
-                }
-                lifetime_singleton = false;
+                lifetime = normalized;
                 lifetime_specified = true;
             }
             _ => panic!(
-                "Invalid #[component] lifetime '{}'. Expected `singleton` or `transient`.",
+                "Invalid #[component] lifetime '{}'. Expected `singleton`, `request`, or `transient`.",
                 mode
             ),
         }
@@ -237,17 +222,19 @@ pub fn component(attr: TokenStream, input: TokenStream) -> TokenStream {
     if args.map.contains_key("transient") {
         set_lifetime("transient");
     }
-
-    if prewarm && !lifetime_singleton {
-        panic!(
-            "`#[component(prewarm, transient)]` is invalid because transient components cannot be prewarmed"
-        );
+    if args.map.contains_key("request") {
+        set_lifetime("request");
     }
 
-    let lifetime_tokens = if lifetime_singleton {
-        quote!(::miko::dependency_container::DependencyLifetime::Singleton)
-    } else {
-        quote!(::miko::dependency_container::DependencyLifetime::Transient)
+    if prewarm && lifetime != "singleton" {
+        panic!("`#[component(prewarm)]` is only valid for singleton components");
+    }
+
+    let lifetime_tokens = match lifetime.as_str() {
+        "singleton" => quote!(::miko::dependency_container::DependencyLifetime::Singleton),
+        "request" => quote!(::miko::dependency_container::DependencyLifetime::Request),
+        "transient" => quote!(::miko::dependency_container::DependencyLifetime::Transient),
+        _ => unreachable!(),
     };
     let mut depend_get_stmts = Vec::new();
     let mut arg_idents = Vec::new();
@@ -272,20 +259,25 @@ pub fn component(attr: TokenStream, input: TokenStream) -> TokenStream {
             ::miko::dependency_container::DependencyDefFn(|| {
                 ::miko::dependency_container::DependencyDef {
                     type_id: std::any::TypeId::of::<#type_ident>(),
+                    type_name: std::any::type_name::<#type_ident>(),
                     prewarm: #prewarm,
                     name: "___",
                     lifetime: #lifetime_tokens,
-                    init_fn: || {
+                    init_fn: |__resolve_context| {
                         Box::pin(async move {
                             #(#depend_get_stmts)*
                             let val: #type_ident = #type_ident::new(#(#arg_idents),*).await;
-                            ::std::sync::Arc::new(val) as ::std::sync::Arc<dyn ::std::any::Any + Send + Sync>
+                            Ok(
+                                ::std::boxed::Box::new(val)
+                                    as ::std::boxed::Box<dyn ::std::any::Any + Send + Sync>
+                            )
                         })
                     }
                 }
             })
         }
-    }.into()
+    }
+    .into()
 }
 
 // ==================== Utoipa 辅助宏 ====================
@@ -602,8 +594,6 @@ pub fn middleware(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let mut config_stmts = Vec::new();
     let mut deps_stmts = Vec::new();
     let mut clone_stmts = Vec::new();
-    build_dep_injector(&args, &mut deps_stmts);
-    build_config_value_injector(&args, &mut config_stmts);
     let outer_args = args.gen_fn_args(|rfa| {
         // 判断是否是req, next
         if let syn::Type::Path(path) = &rfa.ty {
@@ -627,6 +617,8 @@ pub fn middleware(_attr: TokenStream, item: TokenStream) -> TokenStream {
         build_clone_stmt(rfa, &mut clone_stmts);
         FnArgResult::Keep
     });
+    build_dep_injector(&args, &req_ident, &mut deps_stmts);
+    build_config_value_injector(&args, &mut config_stmts);
     let mut inputs = input_fn.sig.inputs;
     inputs.clear();
     inputs.extend(outer_args);

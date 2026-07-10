@@ -38,34 +38,33 @@ where
     fn call(&mut self, req: Req) -> Self::Future {
         let inner = self.inner.clone();
         Box::pin(async move {
-            let Multipart(mut multipart) =
-                Multipart::from_request(req, Arc::new(())).await.unwrap();
-            let ffield;
-            loop {
-                let field = multipart.next_field().await;
-                if let Err(e) = field {
-                    return Ok(AppError::InternalServerError(e.to_string()).into_response());
-                }
-                if let Some(field) = field.unwrap() {
-                    if field.file_name().is_some() {
-                        ffield = Some(FileField {
-                            original_filename: field.file_name().unwrap_or("").to_string(),
-                            content_type: field.content_type().cloned(),
-                            field,
-                        });
-                        break;
-                    } else {
-                        continue;
+            let Multipart(mut multipart) = match Multipart::from_request(req, Arc::new(())).await {
+                Ok(multipart) => multipart,
+                Err(error) => return Ok(error.into_response()),
+            };
+            let file_field = loop {
+                let field = match multipart.next_field().await {
+                    Ok(Some(field)) => field,
+                    Ok(None) => {
+                        return Ok(
+                            AppError::BadRequest("No file field found".to_string()).into_response()
+                        );
                     }
-                } else {
-                    return Ok(
-                        crate::AppError::BadRequest("No file field found".to_string())
-                            .into_response(),
-                    );
-                }
-            }
-            let ffield = inner.process(ffield.unwrap()).await;
-            match ffield {
+                    Err(error) => return Ok(AppError::from(error).into_response()),
+                };
+
+                let Some(original_filename) = field.file_name().map(str::to_owned) else {
+                    continue;
+                };
+
+                break FileField {
+                    original_filename,
+                    content_type: field.content_type().cloned(),
+                    field,
+                };
+            };
+
+            match inner.process(file_field).await {
                 Ok(file) => Ok(format!("uploaded file {}", file.original_filename).into_response()),
                 Err(e) => Ok((StatusCode::BAD_REQUEST, e.into_response()).into_response()),
             }

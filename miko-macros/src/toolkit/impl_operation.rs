@@ -23,8 +23,7 @@ pub fn get_constructor(items: &Vec<ImplItem>) -> Option<&ImplItemFn> {
 
 /// 从构造函数参数列表中生成依赖注入的获取语句并收集参数标识符。
 ///
-/// 要求构造函数参数为 `Arc<T>` 形式；该函数会为第一个依赖注入语句插入读取全局容器的代码片段，
-/// 并为每个参数追加 `let <ident> = container.get::<T>().await.clone();` 之类的语句，同时收集参数名到 `arg_idents`。
+/// 根据构造函数参数是否为 `Arc<T>` 选择共享解析或 transient 按值解析。
 pub fn inject_deps(
     args: &Punctuated<FnArg, Comma>,
     depend_get_stmts: &mut Vec<TokenStream>,
@@ -39,18 +38,18 @@ pub fn inject_deps(
                 }
             };
             let (is_arc, inner) = is_arc(&pat.ty);
-            if !is_arc {
-                panic!("service method new argument must be Arc<T>")
-            }
-            let pat_ident = &inner.unwrap();
-            if depend_get_stmts.is_empty() {
+            if is_arc {
+                let inner = inner.expect("Arc dependency should have an inner type");
                 depend_get_stmts.push(quote! {
-                    let container = ::miko::dependency_container::CONTAINER.get().unwrap().read().await;
-                })
+                    let #arg_ident = __resolve_context.resolve::<#inner>().await?;
+                });
+            } else {
+                let dependency_type = &pat.ty;
+                depend_get_stmts.push(quote! {
+                    let #arg_ident =
+                        __resolve_context.resolve_owned::<#dependency_type>().await?;
+                });
             }
-            depend_get_stmts.push(quote! {
-                let #arg_ident = container.get::<#pat_ident>().await.clone();
-            });
             arg_idents.push(arg_ident);
         }
     }

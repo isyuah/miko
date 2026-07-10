@@ -121,6 +121,26 @@ async fn get_user(#[path] id: u32) -> Json<User> {
 
 ### 4. 生成 OpenAPI 文档
 
+如果启用 `utoipa` + `auto`，可用 `AutoPaths` 自动收集宏路由（仅包含 `#[get]`、`#[post]`、`#[route]` 等宏注册的路由）：
+
+```rust
+use miko::OpenApi;
+use miko::openapi::AutoPaths;
+
+#[derive(OpenApi)]
+#[openapi(
+    info(
+        title = "Blog API",
+        version = "1.0.0",
+        description = "A simple blog API"
+    ),
+    modifiers(&AutoPaths)
+)]
+struct ApiDoc;
+```
+
+如需手动维护 `paths(...)`，仍可使用下面写法：
+
 ```rust
 use miko::OpenApi;
 use miko::macros::*;

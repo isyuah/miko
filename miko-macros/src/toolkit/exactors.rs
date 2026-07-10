@@ -62,12 +62,12 @@ fn extract_desc_attr(attrs: &[syn::Attribute]) -> proc_macro2::TokenStream {
     #[cfg(feature = "utoipa")]
     {
         for attr in attrs {
-            if attr.path().is_ident("desc") {
-                if let Ok(lit) = attr.parse_args::<syn::LitStr>() {
-                    return quote! {
-                        #[schema(description = #lit)]
-                    };
-                }
+            if attr.path().is_ident("desc")
+                && let Ok(lit) = attr.parse_args::<syn::LitStr>()
+            {
+                return quote! {
+                    #[schema(description = #lit)]
+                };
             }
         }
     }

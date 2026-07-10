@@ -4,10 +4,12 @@ use crate::route::layer::extract_layer_attrs;
 use crate::route::{RouteAttr, build_register_expr};
 use crate::toolkit::exactors::build_struct_from_query;
 use crate::toolkit::rout_arg::{
-    FnArgResult, IntoFnArgs, RouteFnArg, build_config_value_injector, build_dep_injector,
+    FnArgResult, IntoFnArgs, RouteFnArg, build_config_value_injector, build_dep_extractors,
 };
 use proc_macro::TokenStream;
 use proc_macro2::{Ident, Span};
+#[cfg(all(feature = "utoipa", feature = "auto"))]
+use quote::format_ident;
 use quote::quote;
 use syn::{ItemFn, Stmt, parse_quote};
 
@@ -57,9 +59,8 @@ pub fn route_handler(args: RouteAttr, mut fn_item: ItemFn) -> TokenStream {
             FnArgResult::Remove
         }
     });
-    //处理dep
-    let mut dep_stmts = Vec::new();
-    build_dep_injector(&rfa, &mut dep_stmts);
+    // 处理 dep，将其转换为内部 Dep<T> 提取器
+    let (dep_inputs, dep_stmts) = build_dep_extractors(&rfa);
     // 处理config_value
     let mut config_value_stmts = Vec::new();
     build_config_value_injector(&rfa, &mut config_value_stmts);
@@ -75,6 +76,8 @@ pub fn route_handler(args: RouteAttr, mut fn_item: ItemFn) -> TokenStream {
     if q_struct.is_some() {
         sig.inputs.push(q_struct_exactor.unwrap());
     }
+    // 依赖只读取请求扩展，必须放在可能消费 body 的普通提取器之前
+    sig.inputs.extend(dep_inputs);
     // 组装plain_inputs
     sig.inputs.extend(plain_inputs);
     // 最后组装body
@@ -91,6 +94,25 @@ pub fn route_handler(args: RouteAttr, mut fn_item: ItemFn) -> TokenStream {
     #[cfg(feature = "utoipa")]
     let utoipa_attr =
         generate_utoipa_attr(&args, &original_attrs, &original_inputs, &original_output);
+    #[cfg(all(feature = "utoipa", feature = "auto"))]
+    let openapi_collect = {
+        let openapi_ident = format_ident!("__miko_openapi_{}", fn_name);
+        quote! {
+            #[allow(non_camel_case_types)]
+            #[derive(::miko::OpenApi)]
+            #[openapi(paths(#fn_name))]
+            struct #openapi_ident;
+
+            ::miko::inventory::submit! {
+                ::miko::openapi::OpenApiRoute {
+                    openapi: <#openapi_ident as ::miko::utoipa::OpenApi>::openapi,
+                    module_path: module_path!(),
+                }
+            }
+        }
+    };
+    #[cfg(all(feature = "utoipa", not(feature = "auto")))]
+    let openapi_collect = proc_macro2::TokenStream::new();
 
     #[cfg(feature = "utoipa")]
     {
@@ -106,6 +128,7 @@ pub fn route_handler(args: RouteAttr, mut fn_item: ItemFn) -> TokenStream {
           }
 
           #inventory_collect
+          #openapi_collect
 
         }
         .into()
@@ -146,7 +169,7 @@ pub fn route_handler_no_register(args: RouteAttr, mut fn_item: ItemFn) -> TokenS
     // 自动返回值
     let sig = &mut fn_item.sig;
     if matches!(sig.output, syn::ReturnType::Default) {
-        (*sig).output = parse_quote!(-> impl ::miko::http::response::into_response::IntoResponse)
+        sig.output = parse_quote!(-> impl ::miko::http::response::into_response::IntoResponse)
     }
     let inject_segs: Vec<Stmt> = Vec::new();
     let rfa = RouteFnArg::from_punctuated(&mut sig.inputs);
@@ -161,9 +184,8 @@ pub fn route_handler_no_register(args: RouteAttr, mut fn_item: ItemFn) -> TokenS
             FnArgResult::Remove
         }
     });
-    //处理dep
-    let mut dep_stmts = Vec::new();
-    build_dep_injector(&rfa, &mut dep_stmts);
+    // 处理 dep，将其转换为内部 Dep<T> 提取器
+    let (dep_inputs, dep_stmts) = build_dep_extractors(&rfa);
     // 处理config_value
     let mut config_value_stmts = Vec::new();
     build_config_value_injector(&rfa, &mut config_value_stmts);
@@ -173,15 +195,13 @@ pub fn route_handler_no_register(args: RouteAttr, mut fn_item: ItemFn) -> TokenS
     // 组装path
     sig.inputs.extend(path_inputs);
     // 构建 Query 结构体和解构提取器
-    let q_struct_ident = Ident::new(
-        &format!("__{}_QueryStruct", fn_name.to_string()),
-        Span::call_site(),
-    );
+    let q_struct_ident = Ident::new(&format!("__{}_QueryStruct", fn_name), Span::call_site());
     // 重组Query
     let (q_struct, q_struct_exactor) = build_struct_from_query(&rfa, q_struct_ident);
     if q_struct.is_some() {
         sig.inputs.push(q_struct_exactor.unwrap());
     }
+    sig.inputs.extend(dep_inputs);
     // 组装plain_inputs
     sig.inputs.extend(plain_inputs);
     // 最后组装body

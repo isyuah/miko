@@ -128,6 +128,26 @@ async fn get_user(#[path] id: u32) -> Json<User> {
 
 ### 4. Generate OpenAPI Document
 
+If `utoipa` + `auto` are enabled, use `AutoPaths` to collect macro routes (only routes declared with `#[get]`, `#[post]`, `#[route]`, etc.):
+
+```rust
+use miko::OpenApi;
+use miko::openapi::AutoPaths;
+
+#[derive(OpenApi)]
+#[openapi(
+    info(
+        title = "Blog API",
+        version = "1.0.0",
+        description = "A simple blog API"
+    ),
+    modifiers(&AutoPaths)
+)]
+struct ApiDoc;
+```
+
+If you want to maintain `paths(...)` manually, you can still use:
+
 ```rust
 use miko::OpenApi;
 use miko::macros::*;
@@ -143,8 +163,8 @@ use miko::macros::*;
         (url = "http://localhost:8080", description = "Local server")
     ),
     tags(
-        (name = "User Management", description = "User related endpoints"),
-        (name = "Post Management", description = "Post related endpoints")
+        (name = "User Management", description = "User related APIs"),
+        (name = "Post Management", description = "Post related APIs")
     )
 )]
 struct ApiDoc;
