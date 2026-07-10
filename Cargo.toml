@@ -3,8 +3,8 @@ members = ["miko", "miko-core", "miko-macros"]
 resolver = "3"
 
 [workspace.dependencies]
-miko-core = { path = "miko-core", version = "0.8.0" }
-miko-macros = { path = "miko-macros", version = "0.8.0" }
+miko-core = { path = "miko-core", version = "0.9.0" }
+miko-macros = { path = "miko-macros", version = "0.9.0" }
 
 [workspace.metadata.release]
 # 通用配置，只能放这些字段
