@@ -44,16 +44,13 @@ The `#[miko]` macro expands to:
 ```rust
 #[tokio::main]
 async fn main() {
-    // 1. Initialize the dependency injection container
-    miko::auto::init_container().await;
-
-    // 2. Load configuration files (config.toml + config.{dev/prod}.toml)
+    // 1. Load configuration files (config.toml + config.{dev/prod}.toml)
     let config = miko::app::ApplicationConfig::load();
 
-    // 3. Collect all routes marked with macros like #[get], #[post]
+    // 2. Collect all routes marked with macros like #[get], #[post]
     let router = miko::auto::collect_routes();
 
-    // 4. Create and run the application
+    // 3. Create and run the application with its own dependency container
     miko::app::Application::new(config, router)
         .run()
         .await
@@ -68,7 +65,6 @@ If you need more control, you can choose not to use the `#[miko]` macro:
 ```rust
 use miko::*;
 use miko::macros::*;
-use miko::auto::init_container;
 
 #[get("/")]
 async fn index() -> &'static str {
@@ -77,9 +73,6 @@ async fn index() -> &'static str {
 
 #[tokio::main]
 async fn main() {
-    // Manual initialization
-    init_container().await;
-
     // Custom configuration
     let mut config = ApplicationConfig::default();
     config.port = 9000;

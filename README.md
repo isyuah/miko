@@ -233,10 +233,19 @@ async fn hello() -> &'static str {
 
 ### OpenAPI 文档
 
-自动生成 API 文档：（只是推断params summary descripion required这些，其他的还需要自己写，比如opanapi的一个结构体，还有paths这种）
+自动生成 API 文档：支持推断参数、摘要、描述等。若启用 `utoipa` + `auto`，还可用
+`AutoPaths` 自动收集宏路由，免去手写 `paths(...)`。
 
 ```rust
 use miko::*;
+use miko::openapi::AutoPaths;
+
+#[derive(OpenApi)]
+#[openapi(
+    info(title = "Miko Basic Example API", version = "1.0.0"),
+    modifiers(&AutoPaths)
+)]
+struct ApiDoc;
 
 #[derive(Serialize, Deserialize, ToSchema)]
 struct User {

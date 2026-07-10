@@ -118,14 +118,11 @@ res.assert_json(json!({ "id": 1 }));
 
 ## Testing Dependency Injection (DI)
 
-When using `Application::test_client()` or manual initialization, ensure the DI container is ready:
+`Application::test_client()` and `Router::test_client()` each use an independent DI container; no manual initialization is required:
 
 ```rust
 #[tokio::test]
 async fn test_di() {
-    // If not using create_app().await, manually initialize DI
-    miko::auto::init_container().await;
-
     let mut router = Router::new();
     router.merge(miko::auto::collect_global_router());
 

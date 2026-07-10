@@ -234,10 +234,18 @@ async fn hello() -> &'static str {
 
 ### OpenAPI Documentation
 
-Automatically generate API documentation: (This just infers params, summary, description, required, etc. You still need to write other things yourself, like an OpenAPI struct and paths.)
+Automatically generate API documentation with inferred params, summary, and description. When `utoipa` + `auto` are enabled, `AutoPaths` can collect macro routes so you do not need to maintain `paths(...)` manually.
 
 ```rust
 use miko::*;
+use miko::openapi::AutoPaths;
+
+#[derive(OpenApi)]
+#[openapi(
+    info(title = "Miko Basic Example API", version = "1.0.0"),
+    modifiers(&AutoPaths)
+)]
+struct ApiDoc;
 
 #[derive(Serialize, Deserialize, ToSchema)]
 struct User {

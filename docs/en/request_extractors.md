@@ -286,11 +286,6 @@ State is wrapped in `Arc<T>` and can be safely shared across multiple handlers.
 > // ✅ Can mix - Manual route registration
 > #[tokio::main]
 > async fn main() {
->     use miko::auto::init_container;
->
->     // Initialize dependency container (supports #[dep])
->     init_container().await;
->
 >     let state = AppState { /* ... */ };
 >     let router = Router::new()
 >         .with_state(state)
