@@ -1,3 +1,4 @@
+use crate::AppError;
 use crate::extractor::from_request::{FRFut, FromRequest};
 use crate::handler::Req;
 use bytes::Bytes;
@@ -70,15 +71,15 @@ impl<S> FromRequest<S> for MultipartResult {
         Box::pin(async move {
             let mut form = HashMap::new();
             let mut files = HashMap::new();
-            let boundary = parse_boundary(req.headers());
-            if let Err(err) = boundary {
-                return Err(err.into());
-            }
-            let boundary = boundary.unwrap().to_string();
+            let boundary = parse_boundary(req.headers())?;
             let body = req.into_body().into_data_stream();
             let mut multipart = multer::Multipart::new(body, boundary);
             while let Some(field) = multipart.next_field().await? {
-                let name = field.name().unwrap().to_string();
+                let name = field.name().map(str::to_owned).ok_or_else(|| {
+                    AppError::MultipartParseError(
+                        "Multipart field is missing the required name".to_string(),
+                    )
+                })?;
                 if let Some(filename) = field.file_name() {
                     let filename = filename.to_string();
                     let content_type = field.content_type().cloned();
@@ -120,11 +121,7 @@ impl<S> FromRequest<S> for MultipartResult {
 impl<S> FromRequest<S> for Multipart {
     fn from_request(req: Req, _state: Arc<S>) -> FRFut<Self> {
         Box::pin(async move {
-            let boundary = parse_boundary(req.headers());
-            if let Err(err) = boundary {
-                return Err(err.into());
-            }
-            let boundary = boundary.unwrap().to_string();
+            let boundary = parse_boundary(req.headers())?;
             let body = req.into_body().into_data_stream();
             let multipart = multer::Multipart::new(body, boundary);
             Ok(Multipart(multipart))
@@ -132,11 +129,12 @@ impl<S> FromRequest<S> for Multipart {
     }
 }
 
-fn parse_boundary(headers: &HeaderMap) -> Result<String, anyhow::Error> {
-    headers
+fn parse_boundary(headers: &HeaderMap) -> Result<String, AppError> {
+    let content_type = headers
         .get("Content-Type")
-        .and_then(|ct| ct.to_str().ok())
-        .and_then(|ct| ct.split("boundary=").nth(1))
-        .map(|s| s.to_string())
-        .ok_or_else(|| anyhow::anyhow!("No boundary found"))
+        .ok_or_else(|| AppError::MultipartParseError("Missing Content-Type header".to_string()))?
+        .to_str()
+        .map_err(|err| AppError::MultipartParseError(err.to_string()))?;
+
+    multer::parse_boundary(content_type).map_err(AppError::from)
 }

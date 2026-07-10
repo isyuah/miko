@@ -1,8 +1,8 @@
-/// ValidatedJson 提取器
-///
-/// 自动解析 JSON 并验证，验证失败时自动转换为 AppError::ValidationError
-///
-/// 需要启用 `validation` feature
+//! ValidatedJson 提取器
+//!
+//! 自动解析 JSON 并验证，验证失败时自动转换为 AppError::ValidationError
+//!
+//! 需要启用 `validation` feature
 
 #[cfg(feature = "validation")]
 use crate::error::AppError;
@@ -70,10 +70,9 @@ where
                 .map_err(|e| AppError::BadRequest(format!("Failed to read request body: {}", e)))?
                 .to_bytes();
 
-            let value: T =
-                serde_json::from_slice(&body).map_err(|e| AppError::JsonParseError(e))?;
+            let value: T = serde_json::from_slice(&body).map_err(AppError::JsonParseError)?;
 
-            value.validate().map_err(|report| AppError::from(report))?;
+            value.validate().map_err(AppError::from)?;
 
             Ok(ValidatedJson(value))
         })
