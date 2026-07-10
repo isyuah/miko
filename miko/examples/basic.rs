@@ -350,8 +350,8 @@ pub async fn create_app() {
 
     router.nest("/no_macro", no_macro_router);
 
-    // register openapi route
-    // macro-based routes can be add to openapi doc by using modifiers
+    // Register OpenAPI route
+    // Macro-based routes can be added to the OpenAPI doc by using modifiers
     router.get("/api-docs/openapi.json", || async {
         Json(ApiDoc::openapi())
     });
@@ -371,7 +371,7 @@ pub async fn create_app() {
 }
 
 #[tokio::main]
-#[allow(unused)]
+#[allow(dead_code)]
 async fn main() {
     tracing_subscriber::fmt::init(); // initialize logging (optional)
     let app = create_app().await;

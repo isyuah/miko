@@ -136,7 +136,8 @@ impl std::error::Error for ResolveError {}
 
 impl From<ResolveError> for AppError {
     fn from(error: ResolveError) -> Self {
-        Self::InternalServerError(error.to_string())
+        tracing::error!(error = %error, "dependency resolution failed");
+        Self::InternalServerError("Dependency resolution failed".to_string())
     }
 }
 
@@ -281,12 +282,14 @@ impl LazyDependencyContainer {
         self.try_get_::<T>("___").await
     }
 
+    /// Panics if dependency resolution fails; prefer `try_get_` for fallible resolution.
     pub async fn get_<T: 'static + Send + Sync>(self: &Arc<Self>, name: &'static str) -> Arc<T> {
         self.try_get_::<T>(name)
             .await
             .expect("dependency resolution failed")
     }
 
+    /// Panics if dependency resolution fails; prefer `try_get` for fallible resolution.
     pub async fn get<T: 'static + Send + Sync>(self: &Arc<Self>) -> Arc<T> {
         self.get_::<T>("___").await
     }
