@@ -8,10 +8,11 @@ miko-macros = { path = "miko-macros", version = "0.8.0" }
 
 [workspace.metadata.release]
 # 通用配置，只能放这些字段
+shared-version = true
 tag-name = "v{{version}}"
 push = true
 publish = true
 allow-branch = ["main", "master"]
 tag-message = "Release version {{version}}"
 consolidate-commits = true
-pre-release-commit-message = "chore: release {{version}}"
+pre-release-commit-message = "chore: release v{{version}}"
