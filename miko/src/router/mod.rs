@@ -376,14 +376,22 @@ impl<S: Send + Sync + 'static> Router<S> {
     }
 
     /// 将路由器转换为 Tower Service，自动应用之前注册的 Layer
-    pub fn into_tower_service(mut self) -> HttpSvc<Req> {
+    pub fn into_tower_service(self) -> HttpSvc<Req> {
+        self.into_tower_service_with_container(crate::dependency_container::default_container())
+    }
+
+    /// 使用指定依赖容器转换为 Tower Service。
+    pub fn into_tower_service_with_container(
+        mut self,
+        container: Arc<crate::dependency_container::LazyDependencyContainer>,
+    ) -> HttpSvc<Req> {
         let layers = std::mem::take(&mut self.layers);
         let router_svc = RouterSvc { router: self };
         let mut svc: HttpSvc<Req> = BoxCloneService::new(router_svc);
         for apply in layers {
             svc = apply(svc);
         }
-        svc
+        crate::dependency_container::with_dependency_scope(svc, container)
     }
 
     /// 从可变借用中取出所有权，便于在构建链路中重组 Router

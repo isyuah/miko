@@ -1,5 +1,4 @@
 use hyper::StatusCode;
-use miko::auto::init_container;
 use miko::extractor::Path;
 use miko::macros::*;
 use miko::router::Router;
@@ -22,7 +21,6 @@ async fn macro_route(#[dep] svc: Arc<TestService>) {
 
 #[tokio::test]
 async fn test_test_client() {
-    init_container().await;
     let mut router = Router::new();
     router.get("/hello", || async move { "world" });
     router.post("/echo", |req: String| async move { req });

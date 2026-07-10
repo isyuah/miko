@@ -1,4 +1,5 @@
 use crate::app::config::ServerSettings;
+use crate::dependency_container::{LazyDependencyContainer, default_container};
 use crate::handler::Req;
 use crate::http::convert::incoming_to_req::IncomingToInternal;
 use crate::router::HttpSvc;
@@ -23,15 +24,26 @@ pub mod config;
 pub struct Application {
     settings: ServerSettings,
     svc: HttpSvc<Req>,
+    dependencies: std::sync::Arc<LazyDependencyContainer>,
 }
 
 /// 应用程序
 impl Application {
     /// 使用给定的配置与 Router 构建一个应用实例
     pub fn new<S: Send + Sync + 'static>(settings: ServerSettings, router: Router<S>) -> Self {
+        Self::with_dependencies(settings, router, default_container())
+    }
+
+    /// 使用显式依赖容器构建应用实例。
+    pub fn with_dependencies<S: Send + Sync + 'static>(
+        settings: ServerSettings,
+        router: Router<S>,
+        dependencies: std::sync::Arc<LazyDependencyContainer>,
+    ) -> Self {
         Self {
             settings,
-            svc: router.into_tower_service(),
+            svc: router.into_tower_service_with_container(dependencies.clone()),
+            dependencies,
         }
     }
 
@@ -40,10 +52,18 @@ impl Application {
         Self::new(ServerSettings::from_global_settings(), router)
     }
 
+    pub fn dependencies(&self) -> &std::sync::Arc<LazyDependencyContainer> {
+        &self.dependencies
+    }
+
     /// 运行应用，基于配置中的地址与端口监听并处理请求
     ///
     /// 此方法会阻塞当前异步任务，直到出现网络错误或手动终止。
     pub async fn run(self) -> IoResult<()> {
+        self.dependencies
+            .prewarm_all()
+            .await
+            .map_err(std::io::Error::other)?;
         let addr = format!("{}:{}", self.settings.host, self.settings.port);
         let listener = TcpListener::bind(addr).await?;
         let executor = TokioExecutor::new();

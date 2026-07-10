@@ -1,18 +1,8 @@
 mod route;
 pub use route::*;
 
-/// 初始化依赖容器，注册并后台预热所有组件
-pub async fn init_container() {
-    crate::dependency_container::CONTAINER
-        .get_or_init(|| async { crate::dependency_container::LazyDependencyContainer::new_() })
-        .await;
-    tokio::spawn(async {
-        crate::dependency_container::CONTAINER
-            .get()
-            .unwrap()
-            .read()
-            .await
-            .prewarm_all()
-            .await;
-    });
+/// 创建一个由 inventory 注册项构成的独立依赖容器。
+pub async fn init_container() -> std::sync::Arc<crate::dependency_container::LazyDependencyContainer>
+{
+    crate::dependency_container::default_container()
 }

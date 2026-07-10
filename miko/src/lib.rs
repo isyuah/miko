@@ -26,11 +26,19 @@ pub use hyper;
 pub use inventory;
 pub use miko_core;
 pub use serde;
+pub use serde_json;
 // repub
 pub use tokio;
 pub use tower;
+#[cfg(any(feature = "ext", feature = "catch_panic"))]
 pub use tower_http;
 pub use tracing;
+
+#[cfg(feature = "auto")]
+pub use dependency_container::{Dep, OwnedDep};
+
+#[cfg(all(feature = "utoipa", feature = "auto"))]
+pub mod openapi;
 
 #[cfg(feature = "utoipa")]
 pub use utoipa::{self, IntoParams, OpenApi, ToResponse, ToSchema};
