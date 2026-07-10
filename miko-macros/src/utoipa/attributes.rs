@@ -250,17 +250,17 @@ pub fn parse_utoipa_attrs(attrs: &[Attribute]) -> crate::utoipa::config::OpenApi
             }
         } else if path.is_ident("u_deprecated") {
             config.deprecated = true;
-        } else if path.is_ident("u_request_body") {
-            if let Ok(req_body) = attr.parse_args::<URequestBodyAttr>() {
-                config.user_request_body = Some(crate::utoipa::config::RequestBodyConfig {
-                    ty: req_body.content,
-                    description: req_body.description,
-                    required: true,
-                    content_type: req_body
-                        .content_type
-                        .unwrap_or_else(|| "application/json".to_string()),
-                });
-            }
+        } else if path.is_ident("u_request_body")
+            && let Ok(req_body) = attr.parse_args::<URequestBodyAttr>()
+        {
+            config.user_request_body = Some(crate::utoipa::config::RequestBodyConfig {
+                ty: req_body.content,
+                description: req_body.description,
+                required: true,
+                content_type: req_body
+                    .content_type
+                    .unwrap_or_else(|| "application/json".to_string()),
+            });
         }
     }
 

@@ -1,5 +1,11 @@
 use hyper::StatusCode;
+#[allow(unused_imports)]
+use miko::macros::{get, u_tag};
 use serde_json::json;
+
+#[get("/openapi-explicit-tag")]
+#[u_tag("explicit")]
+async fn openapi_explicit_tag() {}
 
 #[path = "../examples/basic.rs"]
 mod basic_example;
@@ -85,4 +91,18 @@ async fn test_basic_integration() {
         .send()
         .await
         .assert_text("Hello, World! (manually defined router)");
+
+    // --- 测试 12: OpenAPI 自动收集路径、默认 tag 与组件 schema ---
+    let openapi: serde_json::Value = client.get("/api-docs/openapi.json").send().await.json();
+    assert!(openapi.pointer("/paths/~1form/post").is_some());
+    let default_tag = openapi
+        .pointer("/paths/~1form/post/tags/0")
+        .and_then(serde_json::Value::as_str)
+        .expect("OpenAPI operation should have a default module tag");
+    assert!(default_tag.ends_with("basic_example"));
+    assert_eq!(
+        openapi.pointer("/paths/~1openapi-explicit-tag/get/tags/0"),
+        Some(&json!("explicit"))
+    );
+    assert!(openapi.pointer("/components/schemas/FormStruct").is_some());
 }

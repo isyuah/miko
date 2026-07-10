@@ -3,6 +3,7 @@
 //! 这些测试验证自动推断和配置合并是否正常工作
 
 #[cfg(test)]
+#[allow(clippy::module_inception)]
 mod tests {
     use crate::utoipa::{
         config::{OpenApiConfig, ParamLocation, ResponseConfig},
@@ -135,6 +136,24 @@ mod tests {
         assert_eq!(
             rb3.unwrap().content_type,
             "application/x-www-form-urlencoded"
+        );
+    }
+
+    #[test]
+    fn test_dependency_is_ignored_without_hiding_body_inference() {
+        let inputs: Punctuated<FnArg, Comma> = parse_quote! {
+            body: String,
+            #[dep] service: Arc<Service>
+        };
+
+        let (params, request_body) = infer_params_from_fn_args(&inputs);
+
+        assert!(params.is_empty());
+        assert_eq!(
+            request_body
+                .expect("String body should still be inferred")
+                .content_type,
+            "text/plain"
         );
     }
 }
